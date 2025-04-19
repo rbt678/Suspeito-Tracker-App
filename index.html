@@ -238,6 +238,7 @@
         // --- Componente: Painel de Conhecimento (Tela Principal) ---
         function MainScreen({ gameState, onRegisterAccusation, onEditPlayer, onNewGame }) {
             const { players, playerKnowledge } = gameState;
+            const [showAllCardsStatus, setShowAllCardsStatus] = useState(false); // State to toggle all cards section visibility
 
             const getCardStatus = (playerName, card) => {
                 if (playerKnowledge[playerName]?.tem.includes(card)) {
@@ -271,6 +272,53 @@
                 );
             };
 
+            // Function to determine overall card status across all players
+            const getOverallCardStatus = (card) => {
+                let hasIt = false;
+                let possiblyHasIt = false;
+
+                players.forEach(player => {
+                    if (playerKnowledge[player]?.tem.includes(card)) {
+                        hasIt = true;
+                    }
+                    if (playerKnowledge[player]?.possivelmenteTem.includes(card)) {
+                        possiblyHasIt = true;
+                    }
+                });
+
+                if (hasIt) {
+                    return { status: 'Tem', color: 'bg-green-200 text-green-800' };
+                }
+                if (possiblyHasIt) {
+                    return { status: 'Possivelmente Tem', color: 'bg-yellow-200 text-yellow-800' };
+                }
+                return { status: 'Desconhecido', color: 'bg-gray-200 text-gray-800' };
+            };
+
+            const renderAllCardsStatus = () => (
+                <div className="mt-8">
+                    <h2 className="text-2xl font-bold mb-4">Status Geral das Cartas</h2>
+                    <div className="space-y-6"> {/* Added spacing between sections */}
+                        {Object.entries(cartasBase).map(([type, cards]) => (
+                            <div key={type}>
+                                <h3 className="text-xl font-semibold mb-3 capitalize">{type}:</h3> {/* Capitalize type for display */}
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                    {cards.map(card => {
+                                        const status = getOverallCardStatus(card);
+                                        return (
+                                            <div key={card} className={`p-3 rounded text-center font-semibold ${status.color}`}>
+                                                {card}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+
+
             return (
                 <div className="container mx-auto p-4">
                     <div className="flex justify-between items-center mb-4">
@@ -283,8 +331,20 @@
                          </button>
                     </div>
 
+                    {/* Button to toggle All Cards Status section */}
+                    <button
+                        className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mb-4"
+                        onClick={() => setShowAllCardsStatus(!showAllCardsStatus)}
+                    >
+                        {showAllCardsStatus ? 'Ocultar Status Geral das Cartas' : 'Mostrar Status Geral das Cartas'}
+                    </button>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-16"> {/* Added mb-16 for FAB */}
+
+                    {/* All Cards Status Section (conditionally rendered) */}
+                    {showAllCardsStatus && renderAllCardsStatus()}
+
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-8 mb-16"> {/* Added mb-16 for FAB */}
                         {players.map(player => (
                             <div key={player} className="bg-white rounded shadow p-4">
                                 <div className="flex justify-between items-center mb-3">
@@ -533,7 +593,7 @@
 
                  // Remove the shown card from 'Não Tem' and 'Possivelmente Tem' for this player
                  updatedKnowledge[currentPlayer].naoTem = updatedKnowledge[currentPlayer].naoTem.filter(c => c !== card);
-                 updatedKnowledge[currentPlayer].possivelmenteTem = updatedKnowledge[currentPlayer].possivelmenteTem.filter(c => c !== card);
+                 updatedKnowledge[currentPlayer].possivelmenteTem = updatedKnowledge[currentPlayer].possivelmenteTem.possivelmenteTem.filter(c => c !== card);
 
 
                  onComplete(updatedKnowledge); // Update game state
