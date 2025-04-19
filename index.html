@@ -593,7 +593,8 @@
 
                  // Remove the shown card from 'Não Tem' and 'Possivelmente Tem' for this player
                  updatedKnowledge[currentPlayer].naoTem = updatedKnowledge[currentPlayer].naoTem.filter(c => c !== card);
-                 updatedKnowledge[currentPlayer].possivelmenteTem = updatedKnowledge[currentPlayer].possivelmenteTem.possivelmenteTem.filter(c => c !== card);
+                 // CORRECTED LINE: Removed the extra .possivelmenteTem
+                 updatedKnowledge[currentPlayer].possivelmenteTem = updatedKnowledge[currentPlayer].possivelmenteTem.filter(c => c !== card);
 
 
                  onComplete(updatedKnowledge); // Update game state
