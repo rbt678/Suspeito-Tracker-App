@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suspeito Tracker</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Estilos customizados para drag-and-drop */
+        .dragging {
+            opacity: 0.5;
+        }
+        /* Estilo para o overlay do modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 90%;
+            max-height: 90%;
+            overflow-y: auto;
+            position: relative;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+        const { createRoot } = ReactDOM; // Import createRoot from ReactDOM
+
+        // --- Definição das Cartas Base ---
+        const cartasBase = {
+            locais: ["Varanda", "Escritório", "Hall Central", "Biblioteca", "Sala de Jantar", "Cozinha", "Banheiro", "Suíte", "Quarto", "Escadaria"],
+            armas: ["Veneno", "Abajur", "Revólver", "Faca", "Tesoura de Poda", "Chave de Boca", "Martelo"],
+            suspeitos: ["Motorista", "Empregada", "Mordomo", "Cozinheiro", "Esposa", "Jardineiro", "Vizinho"],
+        };
+
+        const todasAsCartas = [
+            ...cartasBase.locais,
+            ...cartasBase.armas,
+            ...cartasBase.suspeitos,
+        ];
+
+        // --- Hook Personalizado para Local Storage ---
+        function useLocalStorage(key, initialValue) {
+            const [storedValue, setStoredValue] = useState(() => {
+                try {
+                    const item = window.localStorage.getItem(key);
+                    return item ? JSON.parse(item) : initialValue;
+                } catch (error) {
+                    console.error("Erro ao carregar do Local Storage:", error);
+                    return initialValue;
+                }
+            });
+
+            useEffect(() => {
+                try {
+                    window.localStorage.setItem(key, JSON.stringify(storedValue));
+                } catch (error) {
+                    console.error("Erro ao salvar no Local Storage:", error);
+                }
+            }, [key, storedValue]);
+
+            return [storedValue, setStoredValue];
+        }
+
+        // --- Componente: Tela de Configuração Inicial ---
+        function SetupScreen({ onStartGame, savedPlayers, savedOrder }) {
+            const [numPlayers, setNumPlayers] = useState(savedPlayers ? savedPlayers.length : 3);
+            const [playerNames, setPlayerNames] = useState(savedPlayers || Array(3).fill(''));
+            // Initialize playerOrder based on initial numPlayers or savedPlayers length
+            const [playerOrder, setPlayerOrder] = useState(savedOrder || Array.from({ length: savedPlayers ? savedPlayers.length : 3 }, (_, i) => i));
+
+            const dragItem = useRef(null);
+            const dragOverItem = useRef(null);
+
+            // Atualiza nomes e ordem ao mudar o número de jogadores
+            useEffect(() => {
+                setPlayerNames(prevNames => {
+                    const newNames = [...prevNames];
+                    if (numPlayers > newNames.length) {
+                        // Add new players with empty names
+                        return [...newNames, ...Array(numPlayers - newNames.length).fill('')];
+                    } else if (numPlayers < newNames.length) {
+                        // Remove players
+                        return newNames.slice(0, numPlayers);
+                    }
+                    return newNames; // No change
+                });
+
+                setPlayerOrder(prevOrder => {
+                     // Create a new order based on the new number of players
+                     // Keep existing players in their order if possible
+                     const newOrder = [];
+                     for (let i = 0; i < numPlayers; i++) {
+                         if (i < prevOrder.length) {
+                             newOrder.push(prevOrder[i]);
+                         } else {
+                             // Add new player index
+                             newOrder.push(i);
+                         }
+                     }
+                     // Filter out indices that are now out of bounds if numPlayers decreased
+                     return newOrder.filter(index => index < numPlayers);
+                });
+
+            }, [numPlayers]); // Depende apenas de numPlayers
+
+
+            // Handlers para Drag and Drop
+            const handleDragStart = (e, position) => {
+                dragItem.current = position;
+                e.dataTransfer.effectAllowed = 'move';
+                e.target.classList.add('dragging');
+            };
+
+            const handleDragEnter = (e, position) => {
+                dragOverItem.current = position;
+                const newList = [...playerOrder];
+                const draggedItemContent = newList[dragItem.current];
+                newList.splice(dragItem.current, 1);
+                newList.splice(dragOverItem.current, 0, draggedItemContent);
+                dragItem.current = dragOverItem.current;
+                dragOverItem.current = null;
+                setPlayerOrder(newList);
+            };
+
+             const handleDragLeave = (e) => {
+                // Opcional: remover classe de drag over se necessário
+            };
+
+            const handleDragEnd = (e) => {
+                e.target.classList.remove('dragging');
+                dragItem.current = null;
+                dragOverItem.current = null;
+            };
+
+            const handleDragOver = (e) => {
+                e.preventDefault(); // Necessário para permitir o drop
+            };
+
+
+            const handleNameChange = (index, name) => {
+                setPlayerNames(prevNames => {
+                    const newNames = [...prevNames];
+                    newNames[index] = name;
+                    return newNames;
+                });
+            };
+
+            const canStartGame = numPlayers >= 2 && playerNames.every(name => name.trim() !== '');
+
+            const handleStartClick = () => {
+                 // Mapeia a ordem atual para os nomes dos jogadores
+                const orderedPlayerNames = playerOrder.map(index => playerNames[index]);
+                onStartGame(orderedPlayerNames);
+            };
+
+            return (
+                <div className="container mx-auto p-4">
+                    <h1 className="text-2xl font-bold mb-4">Configuração da Partida</h1>
+
+                    <div className="mb-4">
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Número de Jogadores:</label>
+                        <div className="flex items-center">
+                            <button
+                                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-l"
+                                onClick={() => setNumPlayers(Math.max(2, numPlayers - 1))}
+                                disabled={numPlayers <= 2}
+                            >-</button>
+                            <span className="bg-gray-200 text-gray-800 font-bold py-2 px-4">{numPlayers}</span>
+                            <button
+                                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-r"
+                                onClick={() => setNumPlayers(Math.min(7, numPlayers + 1))}
+                                disabled={numPlayers >= 7}
+                            >+</button>
+                        </div>
+                    </div>
+
+                    <div className="mb-4">
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Nomes e Ordem dos Jogadores (Arraste para reordenar):</label>
+                        <ul className="bg-white rounded shadow overflow-hidden">
+                            {playerOrder.map((originalIndex, index) => (
+                                <li
+                                    key={originalIndex}
+                                    draggable
+                                    onDragStart={(e) => handleDragStart(e, index)}
+                                    onDragEnter={(e) => handleDragEnter(e, index)}
+                                    onDragLeave={handleDragLeave}
+                                    onDragEnd={handleDragEnd}
+                                    onDragOver={handleDragOver}
+                                    className="flex items-center justify-between p-3 border-b last:border-b-0 bg-white hover:bg-gray-50 cursor-move"
+                                >
+                                    <span className="mr-2 text-gray-600">{index + 1}.</span>
+                                    <input
+                                        type="text"
+                                        className="flex-grow border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                        placeholder={`Jogador ${originalIndex + 1}`}
+                                        value={playerNames[originalIndex]}
+                                        onChange={(e) => handleNameChange(originalIndex, e.target.value)}
+                                    />
+                                    {/* Ícone de drag handle (opcional, visual) */}
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400 ml-2" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 100-2 1 1 0 000 2zm-.414 2.586a1 1 0 000 1.414l1.414 1.414a1 1 0 001.414-1.414L9.414 11l-1.414-1.414a1 1 0 00-1.414 0zm7.828-3.172a1 1 0 10-1.414-1.414L10.586 9l1.414 1.414a1 1 0 001.414-1.414zM13 9a1 1 0 100-2 1 1 0 000 2zm-.414 2.586a1 1 0 000 1.414l1.414 1.414a1 1 0 001.414-1.414L13.414 11l-1.414-1.414a1 1 0 00-1.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+
+                    <button
+                        className={`w-full py-3 rounded text-white font-bold ${canStartGame ? 'bg-green-500 hover:bg-green-700' : 'bg-gray-400 cursor-not-allowed'}`}
+                        onClick={handleStartClick}
+                        disabled={!canStartGame}
+                    >
+                        Iniciar Partida
+                    </button>
+                </div>
+            );
+        }
+
+        // --- Componente: Painel de Conhecimento (Tela Principal) ---
+        function MainScreen({ gameState, onRegisterAccusation, onEditPlayer, onNewGame }) {
+            const { players, playerKnowledge } = gameState;
+
+            const getCardStatus = (playerName, card) => {
+                if (playerKnowledge[playerName]?.tem.includes(card)) {
+                    return { status: 'Tem', color: 'text-green-600' };
+                }
+                if (playerKnowledge[playerName]?.naoTem.includes(card)) {
+                    return { status: 'Não Tem', color: 'text-red-600' };
+                }
+                 if (playerKnowledge[playerName]?.possivelmenteTem.includes(card)) {
+                    return { status: 'Possivelmente Tem', color: 'text-yellow-600' };
+                }
+                return { status: 'Desconhecido', color: 'text-gray-500' };
+            };
+
+            const renderCardList = (cards, statusType, playerName) => {
+                const filteredCards = cards.filter(card => {
+                    const status = getCardStatus(playerName, card).status;
+                    return status === statusType;
+                });
+
+                if (filteredCards.length === 0) {
+                    return <p className="text-sm text-gray-500 italic">Nenhuma carta conhecida.</p>;
+                }
+
+                return (
+                    <ul className="list-disc list-inside text-sm">
+                        {filteredCards.map(card => (
+                            <li key={card}>{card}</li>
+                        ))}
+                    </ul>
+                );
+            };
+
+            return (
+                <div className="container mx-auto p-4">
+                    <div className="flex justify-between items-center mb-4">
+                         <h1 className="text-2xl font-bold">Painel de Conhecimento</h1>
+                         <button
+                            className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+                            onClick={onNewGame}
+                         >
+                            Nova Partida
+                         </button>
+                    </div>
+
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-16"> {/* Added mb-16 for FAB */}
+                        {players.map(player => (
+                            <div key={player} className="bg-white rounded shadow p-4">
+                                <div className="flex justify-between items-center mb-3">
+                                    <h2 className="text-xl font-semibold">{player}</h2>
+                                    <button
+                                        className="text-blue-500 hover:text-blue-700"
+                                        onClick={() => onEditPlayer(player)}
+                                        title={`Editar conhecimento de ${player}`}
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                <div className="mb-3">
+                                    <h3 className="text-lg font-medium text-green-700">Tem:</h3>
+                                    {renderCardList(todasAsCartas, 'Tem', player)}
+                                </div>
+
+                                <div className="mb-3">
+                                    <h3 className="text-lg font-medium text-yellow-700">Possivelmente Tem:</h3>
+                                    {renderCardList(todasAsCartas, 'Possivelmente Tem', player)}
+                                </div>
+
+                                <div>
+                                    <h3 className="text-lg font-medium text-red-700">Não Tem:</h3>
+                                    {renderCardList(todasAsCartas, 'Não Tem', player)}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Botão Flutuante para Registrar Acusação */}
+                    <button
+                        className="fixed bottom-4 right-4 bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-full shadow-lg"
+                        onClick={onRegisterAccusation}
+                    >
+                        Registrar Nova Acusação
+                    </button>
+                </div>
+            );
+        }
+
+        // --- Componente: Interface de Edição Manual (Modal) ---
+        function ManualEditModal({ player, gameState, onSave, onCancel }) {
+            const { playerKnowledge } = gameState;
+            const [editedKnowledge, setEditedKnowledge] = useState(() => {
+                // Initialize with current knowledge or empty if player not found
+                 const currentKnowledge = playerKnowledge[player] || { tem: [], naoTem: [], possivelmenteTem: [] };
+                 // Create a map for easier lookup during editing
+                 const cardStatusMap = {};
+                 todasAsCartas.forEach(card => {
+                     if (currentKnowledge.tem.includes(card)) {
+                         cardStatusMap[card] = 'tem';
+                     } else if (currentKnowledge.naoTem.includes(card)) {
+                         cardStatusMap[card] = 'naoTem';
+                     } else if (currentKnowledge.possivelmenteTem.includes(card)) {
+                         cardStatusMap[card] = 'possivelmenteTem';
+                     }
+                      else {
+                         cardStatusMap[card] = 'desconhecido';
+                     }
+                 });
+                 return cardStatusMap;
+            });
+
+            const handleStatusChange = (card, status) => {
+                setEditedKnowledge(prev => ({
+                    ...prev,
+                    [card]: status
+                }));
+            };
+
+            const handleSave = () => {
+                 const newTem = [];
+                 const newNaoTem = [];
+                 const newPossivelmenteTem = [];
+                 todasAsCartas.forEach(card => {
+                     if (editedKnowledge[card] === 'tem') {
+                         newTem.push(card);
+                     } else if (editedKnowledge[card] === 'naoTem') {
+                         newNaoTem.push(card);
+                     } else if (editedKnowledge[card] === 'possivelmenteTem') {
+                         newPossivelmenteTem.push(card);
+                     }
+                 });
+                 onSave(player, { tem: newTem, naoTem: newNaoTem, possivelmenteTem: newPossivelmenteTem });
+            };
+
+             const renderCardControls = (cards, type) => (
+                 <div className="mb-4">
+                     <h4 className="text-md font-semibold mb-2">{type}:</h4>
+                     {cards.map(card => (
+                         <div key={card} className="flex items-center mb-2">
+                             <span className="mr-3">{card}</span>
+                             <div className="flex items-center space-x-2 text-sm">
+                                 <label className="inline-flex items-center">
+                                     <input
+                                         type="radio"
+                                         className="form-radio text-green-600"
+                                         name={`status-${card}`}
+                                         value="tem"
+                                         checked={editedKnowledge[card] === 'tem'}
+                                         onChange={() => handleStatusChange(card, 'tem')}
+                                     />
+                                     <span className="ml-1 text-green-700">Tem</span>
+                                 </label>
+                                 <label className="inline-flex items-center">
+                                     <input
+                                         type="radio"
+                                         className="form-radio text-red-600"
+                                         name={`status-${card}`}
+                                         value="naoTem"
+                                         checked={editedKnowledge[card] === 'naoTem'}
+                                         onChange={() => handleStatusChange(card, 'naoTem')}
+                                     />
+                                     <span className="ml-1 text-red-700">Não Tem</span>
+                                 </label>
+                                  <label className="inline-flex items-center">
+                                     <input
+                                         type="radio"
+                                         className="form-radio text-yellow-600"
+                                         name={`status-${card}`}
+                                         value="possivelmenteTem"
+                                         checked={editedKnowledge[card] === 'possivelmenteTem'}
+                                         onChange={() => handleStatusChange(card, 'possivelmenteTem')}
+                                     />
+                                     <span className="ml-1 text-yellow-700">Possivelmente Tem</span>
+                                 </label>
+                                  <label className="inline-flex items-center">
+                                     <input
+                                         type="radio"
+                                         className="form-radio text-gray-500"
+                                         name={`status-${card}`}
+                                         value="desconhecido"
+                                         checked={editedKnowledge[card] === 'desconhecido'}
+                                         onChange={() => handleStatusChange(card, 'desconhecido')}
+                                     />
+                                     <span className="ml-1 text-gray-600">Desconhecido</span>
+                                 </label>
+                             </div>
+                         </div>
+                     ))}
+                 </div>
+             );
+
+
+            return (
+                <div className="modal-overlay">
+                    <div className="modal-content">
+                        <h2 className="text-xl font-bold mb-4">Editar: {player}</h2>
+
+                        {renderCardControls(cartasBase.locais, 'Locais')}
+                        {renderCardControls(cartasBase.armas, 'Armas')}
+                        {renderCardControls(cartasBase.suspeitos, 'Suspeitos')}
+
+                        <div className="flex justify-end space-x-4 mt-6">
+                            <button
+                                className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded"
+                                onClick={onCancel}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
+                                onClick={handleSave}
+                            >
+                                Salvar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- Componente: Fluxo de Registro de Acusação (Modal Multi-Passo) ---
+        function AccusationFlowModal({ players, gameState, onComplete, onCancel }) {
+            const [step, setStep] = useState(1);
+            const [accusedCards, setAccusedCards] = useState({ local: '', arma: '', suspeito: '' });
+            const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0); // Index in the players array
+            const [message, setMessage] = useState(''); // Message for the user
+
+            // Filter out the player making the accusation if needed (optional based on game rules)
+            // For simplicity, we'll iterate through all players in order for now.
+
+            const handleCardSelect = (type, card) => {
+                setAccusedCards(prev => ({ ...prev, [type]: card }));
+            };
+
+            const handleNextStep1 = () => {
+                if (accusedCards.local && accusedCards.arma && accusedCards.suspeito) {
+                    setStep(2);
+                    setCurrentPlayerIndex(0); // Start with the first player in the list
+                    setMessage(`É a vez de ${players[0]} responder.`);
+                } else {
+                    alert("Por favor, selecione um Local, uma Arma e um Suspeito.");
+                }
+            };
+
+            const handlePlayerResponse = (responseType) => {
+                const currentPlayer = players[currentPlayerIndex];
+                let updatedKnowledge = { ...gameState.playerKnowledge };
+
+                if (responseType === 'naoTem') {
+                    // Add all accused cards to the "Não Tem" list for the current player
+                    updatedKnowledge[currentPlayer] = {
+                        ...updatedKnowledge[currentPlayer],
+                        naoTem: [
+                            ...(updatedKnowledge[currentPlayer]?.naoTem || []),
+                            accusedCards.local,
+                            accusedCards.arma,
+                            accusedCards.suspeito,
+                        ].filter((item, i, arr) => arr.indexOf(item) === i) // Remove duplicates
+                    };
+                    // Also remove these cards from 'Tem' and 'Possivelmente Tem' if they were there
+                    updatedKnowledge[currentPlayer].tem = updatedKnowledge[currentPlayer].tem.filter(card =>
+                        card !== accusedCards.local && card !== accusedCards.arma && card !== accusedCards.suspeito
+                    );
+                    updatedKnowledge[currentPlayer].possivelmenteTem = updatedKnowledge[currentPlayer].possivelmenteTem.filter(card =>
+                        card !== accusedCards.local && card !== accusedCards.arma && card !== accusedCards.suspeito
+                    );
+
+
+                    onComplete(updatedKnowledge); // Update game state immediately
+                    moveToNextPlayer(); // Move to the next player
+
+                } else if (responseType === 'mostrou') {
+                    setStep(3); // Move to step 3 to select the shown card
+                    setMessage(`Qual carta ${currentPlayer} mostrou?`);
+                }
+            };
+
+             const handleCardShown = (card) => {
+                 const currentPlayer = players[currentPlayerIndex];
+                 let updatedKnowledge = { ...gameState.playerKnowledge };
+
+                 // Add the shown card to the "Tem" list for the current player
+                 updatedKnowledge[currentPlayer] = {
+                     ...updatedKnowledge[currentPlayer],
+                     tem: [
+                         ...(updatedKnowledge[currentPlayer]?.tem || []),
+                         card,
+                     ].filter((item, i, arr) => arr.indexOf(item) === i) // Remove duplicates
+                 };
+
+                 // Remove the shown card from 'Não Tem' and 'Possivelmente Tem' for this player
+                 updatedKnowledge[currentPlayer].naoTem = updatedKnowledge[currentPlayer].naoTem.filter(c => c !== card);
+                 updatedKnowledge[currentPlayer].possivelmenteTem = updatedKnowledge[currentPlayer].possivelmenteTem.filter(c => c !== card);
+
+
+                 onComplete(updatedKnowledge); // Update game state
+                 // Accusation flow ends after a card is shown
+                 onCancel(); // Close the modal
+             };
+
+
+            const moveToNextPlayer = () => {
+                const nextPlayerIndex = currentPlayerIndex + 1;
+                if (nextPlayerIndex < players.length) {
+                    setCurrentPlayerIndex(nextPlayerIndex);
+                    setMessage(`É a vez de ${players[nextPlayerIndex]} responder.`);
+                } else {
+                    // All players have responded "Não Tem"
+                    onCancel(); // Close the modal
+                }
+            };
+
+            const renderStep1 = () => (
+                <div>
+                    <h3 className="text-lg font-semibold mb-3">Selecionar Cartas Acusadas</h3>
+                    <div className="mb-4">
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Local:</label>
+                        <select
+                            className="form-select w-full border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={accusedCards.local}
+                            onChange={(e) => handleCardSelect('local', e.target.value)}
+                        >
+                            <option value="">Selecione um Local</option>
+                            {cartasBase.locais.map(card => <option key={card} value={card}>{card}</option>)}
+                        </select>
+                    </div>
+                     <div className="mb-4">
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Arma:</label>
+                        <select
+                            className="form-select w-full border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={accusedCards.arma}
+                            onChange={(e) => handleCardSelect('arma', e.target.value)}
+                        >
+                            <option value="">Selecione uma Arma</option>
+                            {cartasBase.armas.map(card => <option key={card} value={card}>{card}</option>)}
+                        </select>
+                    </div>
+                     <div className="mb-4">
+                        <label className="block text-gray-700 text-sm font-bold mb-2">Suspeito:</label>
+                        <select
+                            className="form-select w-full border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                            value={accusedCards.suspeito}
+                            onChange={(e) => handleCardSelect('suspeito', e.target.value)}
+                        >
+                            <option value="">Selecione um Suspeito</option>
+                            {cartasBase.suspeitos.map(card => <option key={card} value={card}>{card}</option>)}
+                        </select>
+                    </div>
+                    <button
+                         className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded w-full"
+                         onClick={handleNextStep1}
+                         disabled={!(accusedCards.local && accusedCards.arma && accusedCards.suspeito)}
+                    >
+                        Avançar
+                    </button>
+                </div>
+            );
+
+            const renderStep2 = () => {
+                const currentPlayer = players[currentPlayerIndex];
+                return (
+                    <div>
+                        <h3 className="text-lg font-semibold mb-3">Quem Possui a Carta?</h3>
+                        <p className="mb-4 text-center text-gray-700">{message}</p>
+                        <div className="flex justify-center space-x-4">
+                            <button
+                                className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+                                onClick={() => handlePlayerResponse('naoTem')}
+                            >
+                                Não Possui Nenhuma
+                            </button>
+                            <button
+                                className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
+                                onClick={() => handlePlayerResponse('mostrou')}
+                            >
+                                Mostrou Carta
+                            </button>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderStep3 = () => (
+                <div>
+                    <h3 className="text-lg font-semibold mb-3">Qual Carta Foi Mostrada?</h3>
+                     <p className="mb-4 text-center text-gray-700">{message}</p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {[accusedCards.local, accusedCards.arma, accusedCards.suspeito].map(card => (
+                            <button
+                                key={card}
+                                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded"
+                                onClick={() => handleCardShown(card)}
+                            >
+                                {card}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="modal-overlay">
+                    <div className="modal-content">
+                        <h2 className="text-xl font-bold mb-4">Registrar Acusação</h2>
+
+                        {step === 1 && renderStep1()}
+                        {step === 2 && renderStep2()}
+                        {step === 3 && renderStep3()}
+
+                        <div className="flex justify-end mt-6">
+                             <button
+                                className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded"
+                                onClick={onCancel}
+                            >
+                                Cancelar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+
+        // --- Componente Principal da Aplicação ---
+        function App() {
+            const [gameState, setGameState] = useLocalStorage('suspeitoGameState', null); // null initially
+            const [showSetup, setShowSetup] = useState(true);
+            const [editingPlayer, setEditingPlayer] = useState(null); // Player name being edited
+            const [showAccusationFlow, setShowAccusationFlow] = useState(false);
+
+            // Check Local Storage on initial load
+            useEffect(() => {
+                if (gameState && gameState.players && gameState.players.length > 0) {
+                    // Ask user if they want to continue previous game
+                    if (window.confirm("Encontramos uma partida salva. Deseja continuar?")) {
+                        setShowSetup(false); // Go to main screen
+                    } else {
+                        setGameState(null); // Clear saved game
+                        setShowSetup(true); // Stay on setup
+                    }
+                } else {
+                    setShowSetup(true); // No saved game, go to setup
+                }
+            }, []); // Run only once on mount
+
+
+            const handleStartGame = (players) => {
+                // Initialize player knowledge with the new possivelmenteTem array
+                const initialKnowledge = {};
+                players.forEach(player => {
+                    initialKnowledge[player] = { tem: [], naoTem: [], possivelmenteTem: [] };
+                });
+
+                setGameState({ players, playerKnowledge: initialKnowledge });
+                setShowSetup(false); // Go to main screen
+            };
+
+             const handleNewGame = () => {
+                 if (window.confirm("Tem certeza que deseja iniciar uma nova partida? O progresso atual será perdido.")) {
+                     setGameState(null); // Clear saved game
+                     setShowSetup(true); // Go to setup screen
+                 }
+             };
+
+
+            const handleEditPlayer = (player) => {
+                setEditingPlayer(player);
+            };
+
+            const handleSaveEditedKnowledge = (player, knowledge) => {
+                setGameState(prevState => ({
+                    ...prevState,
+                    playerKnowledge: {
+                        ...prevState.playerKnowledge,
+                        [player]: knowledge
+                    }
+                }));
+                setEditingPlayer(null); // Close modal
+            };
+
+            const handleCancelEdit = () => {
+                setEditingPlayer(null); // Close modal
+            };
+
+            const handleRegisterAccusation = () => {
+                setShowAccusationFlow(true);
+            };
+
+             const handleCompleteAccusation = (updatedKnowledge) => {
+                 setGameState(prevState => ({
+                     ...prevState,
+                     playerKnowledge: updatedKnowledge
+                 }));
+                 // The modal is closed by moveToNextPlayer or handleCardShown
+             };
+
+            const handleCancelAccusation = () => {
+                setShowAccusationFlow(false); // Close modal
+            };
+
+
+            return (
+                <div>
+                    {showSetup && (
+                        <SetupScreen
+                            onStartGame={handleStartGame}
+                            savedPlayers={gameState?.players}
+                            savedOrder={gameState?.players ? Array.from({length: gameState.players.length}, (_, i) => i) : null} // Simple order for saved game
+                        />
+                    )}
+
+                    {!showSetup && gameState && (
+                        <MainScreen
+                            gameState={gameState}
+                            onRegisterAccusation={handleRegisterAccusation}
+                            onEditPlayer={handleEditPlayer}
+                            onNewGame={handleNewGame}
+                        />
+                    )}
+
+                    {editingPlayer && (
+                        <ManualEditModal
+                            player={editingPlayer}
+                            gameState={gameState}
+                            onSave={handleSaveEditedKnowledge}
+                            onCancel={handleCancelEdit}
+                        />
+                    )}
+
+                    {showAccusationFlow && gameState && (
+                        <AccusationFlowModal
+                            players={gameState.players}
+                            gameState={gameState}
+                            onComplete={handleCompleteAccusation}
+                            onCancel={handleCancelAccusation}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        // --- Renderizando a Aplicação ---
+        const container = document.getElementById('root');
+        const root = createRoot(container); // Use createRoot
+        root.render(<App />); // Render the App component
+
+    </script>
+</body>
+</html>
